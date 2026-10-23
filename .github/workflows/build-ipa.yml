@@ -1,0 +1,84 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (Xcode 27)
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Select Xcode 27
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "27.0"
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project AnkiSwift.xcodeproj \
+            -scheme AnkiSwift \
+            -clonedSourcePackagesDirPath SourcePackages
+
+      - name: Build app (unsigned)
+        run: |
+          if ! xcodebuild build \
+            -project AnkiSwift.xcodeproj \
+            -scheme AnkiSwift \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath DerivedData \
+            -clonedSourcePackagesDirPath SourcePackages \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" > xcodebuild.log 2>&1
+          then
+            grep -E "error:" xcodebuild.log | sort -u | head -100
+            tail -50 xcodebuild.log
+            exit 1
+          fi
+          grep -E "warning:" xcodebuild.log | sort -u | head -50 || true
+          tail -3 xcodebuild.log
+
+      - name: Package IPA
+        run: |
+          APP_PATH="DerivedData/Build/Products/Release-iphoneos/AnkiSwift.app"
+          test -d "$APP_PATH"
+          rm -rf Payload && mkdir Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry AnkiSwift-unsigned.ipa Payload
+          ls -lh AnkiSwift-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v5
+        with:
+          name: AnkiSwift-unsigned-ipa
+          path: AnkiSwift-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
