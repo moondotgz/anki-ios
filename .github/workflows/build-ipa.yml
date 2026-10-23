@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Select Xcode 27
         uses: maxim-lobanov/setup-xcode@v1
@@ -70,7 +70,7 @@ jobs:
           ls -lh AnkiSwift-unsigned.ipa
 
       - name: Upload IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: AnkiSwift-unsigned-ipa
           path: AnkiSwift-unsigned.ipa
@@ -78,7 +78,7 @@ jobs:
 
       - name: Upload build log
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: xcodebuild-log
           path: xcodebuild.log
