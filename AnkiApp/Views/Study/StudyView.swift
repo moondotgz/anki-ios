@@ -160,7 +160,7 @@ struct StudyView: View {
             } else if let folder = app.col?.mediaFolder {
                 CardWebView(html: model.html(nightMode: colorScheme == .dark, compare: typeCompare),
                             mediaFolder: folder, onMessage: handleMessage, webViewRef: $webView)
-                    .ignoresSafeArea()
+                    .ignoresSafeArea(edges: .bottom)
             }
             VStack {
                 topBar

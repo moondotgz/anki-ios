@@ -146,7 +146,7 @@ enum CardHTML {
             <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=4">
             <style>
             html { -webkit-text-size-adjust: \(Int(fontScale * 100))%; }
-            body { margin: 0; padding: 72px 18px 180px; min-height: 100vh; box-sizing: border-box;
+            body { margin: 0; padding: 68px 18px 180px; min-height: 100vh; box-sizing: border-box;
                    overflow-wrap: break-word; -webkit-user-select: text; }
             img { max-width: 100%; height: auto; }
             .nightMode.card, .nightMode .card { color: #f2f2f7; background-color: #1c1c1e; }
