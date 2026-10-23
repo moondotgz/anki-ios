@@ -360,6 +360,8 @@ final class Collection {
         guard id != 1 else { throw CollectionError.invalid("The default deck can't be deleted.") }
         let ids = deckTreeIDs(id)
         try db.transaction {
+            // like Anki, deleting a filtered deck returns its cards to their decks
+            for did in ids where deck(did)?.isFiltered == true { try emptyFilteredDeck(did) }
             let list = ids.map(String.init).joined(separator: ",")
             let cids = try db.query("select id from cards where did in (\(list)) or odid in (\(list))").map { $0[0].int }
             try removeCards(cids)

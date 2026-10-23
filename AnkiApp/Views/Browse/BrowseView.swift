@@ -8,6 +8,13 @@ struct BrowseView: View {
     @State private var selection = Set<Int64>()
     @State private var editMode: EditMode = .inactive
     @State private var moveTarget: MoveRequest?
+    @State private var dueDateIDs: [Int64] = []
+    @State private var showDueDate = false
+    @State private var dueDateSpec = "0"
+    @State private var infoCard: CardInfoID?
+    @State private var filterFromSearch = false
+
+    struct CardInfoID: Identifiable { let id: Int64 }
 
     struct MoveRequest: Identifiable {
         let ids: [Int64]
@@ -47,7 +54,20 @@ struct BrowseView: View {
                         }
                         .tint(.orange)
                     }
+                    .contextMenu {
+                        Button("Card Info", systemImage: "info.circle") { infoCard = CardInfoID(id: row.id) }
+                        Button("Set Due Date", systemImage: "calendar") {
+                            dueDateIDs = [row.id]
+                            showDueDate = true
+                        }
+                        Button("Toggle Mark", systemImage: "star") {
+                            app.perform { try $0.toggleMark(noteID: row.noteID) }
+                            reload()
+                        }
+                    }
                     .swipeActions(edge: .leading) {
+                        Button("Info", systemImage: "info.circle") { infoCard = CardInfoID(id: row.id) }
+                            .tint(.blue)
                         Button("Flag", systemImage: "flag") {
                             app.perform { try $0.setFlag(cardIDs: [row.id], flag: row.flag == 0 ? 1 : 0) }
                             reload()
@@ -75,6 +95,10 @@ struct BrowseView: View {
                             Button(preset.0, systemImage: preset.2) { query = preset.1 }
                         }
                         Divider()
+                        Button("Create Filtered Deck from Search", systemImage: "line.3.horizontal.decrease.circle") {
+                            filterFromSearch = true
+                        }
+                        Divider()
                         ForEach(app.col?.allDecks ?? []) { deck in
                             Button(deck.name) { query = "\"deck:\(deck.name)\"" }
                         }
@@ -87,6 +111,10 @@ struct BrowseView: View {
                     if editMode == .active && !selection.isEmpty {
                         Menu {
                             Button("Change Deck", systemImage: "folder") { moveTarget = MoveRequest(ids: Array(selection)) }
+                            Button("Set Due Date", systemImage: "calendar") {
+                                dueDateIDs = Array(selection)
+                                showDueDate = true
+                            }
                             Button("Suspend", systemImage: "pause.circle") { bulk { try $0.suspend(cardIDs: $1, true) } }
                             Button("Unsuspend", systemImage: "play.circle") { bulk { try $0.suspend(cardIDs: $1, false) } }
                             Button("Forget", systemImage: "arrow.counterclockwise") { bulk { try $0.forget(cardIDs: $1) } }
@@ -110,6 +138,25 @@ struct BrowseView: View {
                 NavigationStack {
                     NoteEditorView(mode: .edit(note)) { reload() }
                 }
+            }
+            .sheet(item: $infoCard) { target in
+                NavigationStack { CardInfoView(cardID: target.id) }
+            }
+            .sheet(isPresented: $filterFromSearch) {
+                NavigationStack { FilteredDeckEditor(deckID: nil, initialSearch: query) }
+            }
+            .alert("Set Due Date", isPresented: $showDueDate) {
+                TextField("0 = today, 1 = tomorrow, 1-7 = range", text: $dueDateSpec)
+                    .keyboardType(.numbersAndPunctuation)
+                Button("Set") {
+                    let ids = dueDateIDs
+                    app.perform { try $0.setDueDate(cardIDs: ids, spec: dueDateSpec) }
+                    selection.removeAll()
+                    reload()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Days from today. Add ! to also set the interval, e.g. 7!")
             }
             .sheet(item: $moveTarget) { req in
                 NavigationStack {

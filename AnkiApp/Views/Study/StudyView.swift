@@ -30,6 +30,29 @@ final class StudyModel {
         next()
     }
 
+    /// Rebuilds the queue, e.g. after today's limits were increased.
+    func restart() {
+        guard let col = app.col else { return }
+        do {
+            session = try StudySession(scheduler: Scheduler(collection: col), deckID: deckID)
+        } catch {
+            app.errorMessage = error.localizedDescription
+        }
+        next()
+    }
+
+    var isMarked: Bool { note?.hasTag("marked") ?? false }
+
+    func toggleMark() {
+        guard let card, let col = app.col else { return }
+        do {
+            try col.toggleMark(noteID: card.nid)
+            reloadCurrent()
+        } catch {
+            app.errorMessage = error.localizedDescription
+        }
+    }
+
     var config: DeckConfig? {
         guard let card, let col = app.col else { return nil }
         return col.config(forDeck: card.odid != 0 ? card.odid : card.did)
@@ -145,6 +168,10 @@ struct StudyView: View {
     @State private var typeCompare: String?
     @State private var editingNote: Note?
     @State private var confirmDelete = false
+    @State private var showCustomStudy = false
+    @State private var infoCardID: CardInfoTarget?
+
+    struct CardInfoTarget: Identifiable { let id: Int64 }
     @Namespace private var glass
 
     init(app: AppModel, deckID: Int64) {
@@ -156,7 +183,7 @@ struct StudyView: View {
             (colorScheme == .dark ? Color(red: 0.11, green: 0.11, blue: 0.12) : Color.white)
                 .ignoresSafeArea()
             if model.finished {
-                CongratsView(nextLearningDue: model.nextLearningDue) { dismiss() }
+                CongratsView(nextLearningDue: model.nextLearningDue, onCustomStudy: { showCustomStudy = true }) { dismiss() }
             } else if let folder = app.col?.mediaFolder {
                 CardWebView(html: model.html(nightMode: colorScheme == .dark, compare: typeCompare),
                             mediaFolder: folder, onMessage: handleMessage, webViewRef: $webView)
@@ -173,6 +200,21 @@ struct StudyView: View {
             NavigationStack {
                 NoteEditorView(mode: .edit(note)) { model.reloadCurrent() }
             }
+        }
+        .sheet(isPresented: $showCustomStudy) {
+            NavigationStack {
+                CustomStudyView(deckID: model.deckID) { target in
+                    if target == model.deckID {
+                        model.restart()
+                    } else {
+                        dismiss()
+                        app.studyRequest = target
+                    }
+                }
+            }
+        }
+        .sheet(item: $infoCardID) { target in
+            NavigationStack { CardInfoView(cardID: target.id) }
         }
         .confirmationDialog("Delete this note and all its cards?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete Note", role: .destructive) { model.deleteNote() }
@@ -246,6 +288,12 @@ struct StudyView: View {
     private var moreMenu: some View {
         Menu {
             Button("Edit Note", systemImage: "pencil") { editingNote = model.note }
+            Button(model.isMarked ? "Unmark Note" : "Mark Note", systemImage: model.isMarked ? "star.slash" : "star") {
+                model.toggleMark()
+            }
+            Button("Card Info", systemImage: "info.circle") {
+                if let id = model.card?.id { infoCardID = CardInfoTarget(id: id) }
+            }
             Menu("Flag", systemImage: "flag") {
                 ForEach(Flag.all) { flag in
                     Button {
@@ -362,6 +410,7 @@ struct StudyView: View {
 
 struct CongratsView: View {
     let nextLearningDue: Date?
+    var onCustomStudy: (() -> Void)?
     let done: () -> Void
 
     var body: some View {
@@ -380,10 +429,31 @@ struct CongratsView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
-            Button("Done", action: done)
-                .buttonStyle(.glassProminent)
+            GlassEffectContainer(spacing: 10) {
+                VStack(spacing: 10) {
+                    if let onCustomStudy {
+                        Button(action: onCustomStudy) {
+                            Label("Custom Study", systemImage: "sparkles")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                    }
+                    Button(action: done) {
+                        Text("Done").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                }
                 .controlSize(.large)
-                .padding(.top, 8)
+            }
+            .frame(maxWidth: 300)
+            .padding(.top, 8)
+            if onCustomStudy != nil {
+                Text("Keep practicing: study more new or review cards, review ahead, go over forgotten cards, or cram by tag.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
+            }
         }
         .padding(32)
     }

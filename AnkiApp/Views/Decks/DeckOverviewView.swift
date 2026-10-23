@@ -6,6 +6,8 @@ struct DeckOverviewView: View {
     let onStudy: () -> Void
     @State private var exportURL: URL?
     @State private var showOptions = false
+    @State private var showCustomStudy = false
+    @State private var editFiltered = false
     @State private var includeScheduling = true
 
     private var deck: Deck? {
@@ -66,9 +68,38 @@ struct DeckOverviewView: View {
                         VStack(spacing: 10) {
                             if !deck.isFiltered {
                                 Button {
+                                    showCustomStudy = true
+                                } label: {
+                                    Label("Custom Study", systemImage: "sparkles")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.glass)
+                                Button {
                                     showOptions = true
                                 } label: {
                                     Label("Deck Options", systemImage: "slider.horizontal.3")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.glass)
+                            } else {
+                                Button {
+                                    app.perform { _ = try $0.rebuildFilteredDeck(deckID) }
+                                } label: {
+                                    Label("Rebuild", systemImage: "arrow.clockwise")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.glass)
+                                Button {
+                                    app.perform { try $0.emptyFilteredDeck(deckID) }
+                                } label: {
+                                    Label("Empty", systemImage: "tray")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.glass)
+                                Button {
+                                    editFiltered = true
+                                } label: {
+                                    Label("Edit Filter", systemImage: "line.3.horizontal.decrease.circle")
                                         .frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(.glass)
@@ -90,6 +121,16 @@ struct DeckOverviewView: View {
             .padding(20)
         }
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showCustomStudy) {
+            NavigationStack {
+                CustomStudyView(deckID: deckID) { target in
+                    if target == deckID { onStudy() } else { app.studyRequest = target }
+                }
+            }
+        }
+        .sheet(isPresented: $editFiltered) {
+            NavigationStack { FilteredDeckEditor(deckID: deckID) }
+        }
         .sheet(isPresented: $showOptions) {
             NavigationStack { DeckOptionsView(deckID: deckID) }
         }

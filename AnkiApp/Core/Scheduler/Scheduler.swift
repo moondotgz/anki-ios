@@ -529,8 +529,12 @@ final class StudySession {
         let col = scheduler.col
         let now = Time.nowSecs
         learning.sort { $0.due < $1.due }
+        let preview = isPreview
         func fresh(_ c: Card) -> Card? {
-            guard let f = try? col.card(c.id), f.queue == c.queue, f.did == c.did else { return nil }
+            guard let f = try? col.card(c.id), f.did == c.did else { return nil }
+            // preview re-shows keep their session-only due time
+            if preview, c.odid != 0 { return c }
+            guard f.queue == c.queue else { return nil }
             return f
         }
         while let first = learning.first, first.due <= now {
@@ -550,8 +554,30 @@ final class StudySession {
         return nil
     }
 
+    /// In a filtered deck with rescheduling off, answers don't change the
+    /// card's schedule: Again shows it again shortly, anything else returns
+    /// it to its home deck, like Anki's preview mode.
+    var isPreview: Bool {
+        guard let deck = scheduler.col.deck(deckID), deck.isFiltered else { return false }
+        return !deck.json["resched"].bool(or: true)
+    }
+
     func answer(rating: Int, millisecondsTaken: Int) throws {
         guard let card = current else { return }
+        if isPreview && card.odid != 0 {
+            learning.removeAll { $0.id == card.id }
+            main.removeAll { $0.id == card.id }
+            if rating == 1 {
+                var again = card
+                let delay = scheduler.col.deck(deckID)?.json["previewAgainSecs"].int(or: 60) ?? 60
+                again.due = Time.nowSecs + max(1, delay)
+                learning.append(again)
+            } else {
+                try scheduler.col.returnToHomeDeck(cardIDs: [card.id])
+            }
+            current = nil
+            return
+        }
         let undo = try scheduler.answer(cardID: card.id, rating: rating, millisecondsTaken: millisecondsTaken)
         undoStack.append(undo)
         if undoStack.count > 30 { undoStack.removeFirst() }

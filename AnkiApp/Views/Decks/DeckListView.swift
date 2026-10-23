@@ -17,6 +17,7 @@ struct DeckListView: View {
     @State private var renameText = ""
     @State private var deleting: Deck?
     @State private var studying: StudyTarget?
+    @State private var creatingFiltered = false
 
     struct StudyTarget: Identifiable { let id: Int64 }
 
@@ -83,6 +84,7 @@ struct DeckListView: View {
                             newDeckName = ""
                             showNewDeck = true
                         }
+                        Button("Create Filtered Deck", systemImage: "line.3.horizontal.decrease.circle") { creatingFiltered = true }
                         Button("Import Deck", systemImage: "square.and.arrow.down") { showImporter = true }
                         Link(destination: URL(string: "https://ankiweb.net/shared/decks")!) {
                             Label("Get Shared Decks", systemImage: "safari")
@@ -95,6 +97,16 @@ struct DeckListView: View {
             }
             .sheet(isPresented: $addingNote) {
                 NavigationStack { NoteEditorView(mode: .add(deckID: nil)) }
+            }
+            .sheet(isPresented: $creatingFiltered) {
+                NavigationStack {
+                    FilteredDeckEditor(deckID: nil) { id in
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(600))
+                            studying = StudyTarget(id: id)
+                        }
+                    }
+                }
             }
             .fullScreenCover(item: $studying) { target in
                 StudyView(app: app, deckID: target.id)
@@ -227,6 +239,7 @@ struct DeckRow: View {
                 }
                 Text(node.deck.baseName)
                     .font(depth == 0 ? .body.weight(.medium) : .body)
+                    .foregroundStyle(node.deck.isFiltered ? Color.accentColor : Color.primary)
                     .lineLimit(2)
                 Spacer(minLength: 8)
                 CountsView(counts: node.counts)

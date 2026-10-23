@@ -9,7 +9,8 @@ A native Anki flashcard app for iOS and iPadOS, written in Swift and SwiftUI wit
 - **Scheduler.** A port of Anki's v3 SM-2 scheduler: learning and relearning steps, interval fuzz, ease changes, hard/easy multipliers, lapses and leeches, burying siblings, daily limits (including subdeck and parent limits), and day rollover.
 - **Card rendering** handles Anki templates: fields, conditionals, `FrontSide`, `cloze` (including nested and hints), `type:` answers with a diff, `hint:`, `text:`, furigana filters, `[sound:]` audio, images, and notetype CSS with night mode.
 - **Import and export.** It imports `.apkg` decks (including AnkiWeb shared decks) and `.colpkg` backups in all three formats Anki writes (legacy `anki2`, `anki21`, and zstd `anki21b`), and exports decks as `.apkg`. Before importing, it shows what the package contains: decks, note types, notes, cards, media, and how many notes you already have. You can choose whether to keep learning progress and when to update existing notes. If a media file name is already taken by a different file, the incoming file is renamed and the notes that use it are updated. You can open packages from the + menu, from Files, Safari or AirDrop ("Open in Anki"), or by dragging them onto the deck list on iPad.
-- **Other tools:** add and edit notes (with images from Photos), a browser with Anki-style search (`deck:`, `tag:`, `is:due`, `flag:`, `prop:ivl>10`, …), deck options presets, statistics, undo, flags, bury and suspend.
+- **Custom study and filtered decks**, as in Anki desktop. When you finish a deck, or from its overview, Custom Study can increase today's new or review limit, review forgotten cards, review ahead, preview new cards, or study by card state or tag. Filtered decks take up to two searches, each with a limit and an order, with rescheduling or preview mode, and can be rebuilt, emptied and edited. Desktop Anki reads them as normal filtered decks.
+- **Other tools:** add and edit notes (with images from Photos), a browser with Anki-style search (`deck:`, `tag:`, `is:due`, `flag:`, `prop:ivl>10`, …), deck options presets, statistics, undo, flags, bury and suspend, mark note, Card Info with review history, and Set Due Date.
 
 ## Building
 
@@ -64,7 +65,6 @@ The code under `Core/` uses only Foundation, SQLite and zstd, so it also builds 
 ## Limitations
 
 - FSRS: cards are scheduled with SM-2 even if FSRS is turned on in your collection. FSRS memory state already stored on cards is kept.
-- The app can study filtered decks that come from sync but cannot create them.
 - Changing a note type's fields or templates is not supported in the app; edit those in Anki desktop.
 - MathJax is loaded from a CDN when a card contains `\(`…`\)`, so it needs a network connection.
 

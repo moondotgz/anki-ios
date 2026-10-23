@@ -1,7 +1,7 @@
 import Foundation
 
 /// A subset of Anki's search syntax: words and "quoted phrases",
-/// negation with `-`, `or`, and `deck:`, `tag:`, `is:`, `flag:`, `note:`,
+/// negation with `-`, `or`, parentheses, and `deck:`, `tag:`, `is:`, `flag:`, `note:`,
 /// `card:`, `added:`, `rated:`, `prop:ivl`/`prop:due`, `nid:`, `cid:` and
 /// `field:value` searches.
 struct SearchQuery {
@@ -12,22 +12,34 @@ struct SearchQuery {
         var params: [SQLBindable]
     }
 
+    /// Splits a search into terms. Quotes group words; parentheses
+    /// outside quotes become their own tokens, as do `-(`.
     static func tokenize(_ text: String) -> [String] {
         var tokens: [String] = []
         var current = ""
         var inQuote = false
+        func flush() {
+            if !current.isEmpty { tokens.append(current); current = "" }
+        }
         for ch in text {
             if ch == "\"" {
                 inQuote.toggle()
                 continue
             }
-            if ch.isWhitespace && !inQuote {
-                if !current.isEmpty { tokens.append(current); current = "" }
+            if inQuote {
+                current.append(ch)
+            } else if ch.isWhitespace {
+                flush()
+            } else if ch == "(" {
+                if current == "-" { current = ""; tokens.append("-(") } else { flush(); tokens.append("(") }
+            } else if ch == ")" {
+                flush()
+                tokens.append(")")
             } else {
                 current.append(ch)
             }
         }
-        if !current.isEmpty { tokens.append(current) }
+        flush()
         return tokens
     }
 
@@ -39,28 +51,55 @@ struct SearchQuery {
     }
 
     func clause(collection col: Collection, today: Int) -> Clause {
+        var index = 0
+        let tokens = SearchQuery.tokenize(text)
+        return SearchQuery.group(tokens, &index, col: col, today: today)
+    }
+
+    /// Parses terms up to a closing parenthesis: adjacent terms are ANDed,
+    /// `or` separates alternatives.
+    private static func group(_ tokens: [String], _ i: inout Int, col: Collection, today: Int) -> Clause {
         var groups: [[Clause]] = [[]]
-        for token in SearchQuery.tokenize(text) {
-            if token.lowercased() == "or" {
+        while i < tokens.count {
+            let token = tokens[i]
+            i += 1
+            switch token.lowercased() {
+            case ")":
+                return combine(groups)
+            case "or":
                 groups.append([])
                 continue
+            case "and":
+                continue
+            default:
+                break
             }
-            if token.lowercased() == "and" { continue }
-            var negate = false
-            var term = token
-            if term.hasPrefix("-"), term.count > 1 {
-                negate = true
-                term.removeFirst()
+            var c: Clause
+            if token == "(" || token == "-(" {
+                c = group(tokens, &i, col: col, today: today)
+                if token == "-(" { c.sql = "not (\(c.sql))" }
+            } else {
+                var negate = false
+                var term = token
+                if term.hasPrefix("-"), term.count > 1 {
+                    negate = true
+                    term.removeFirst()
+                }
+                guard let t = SearchQuery.term(term, col: col, today: today) else { continue }
+                c = t
+                if negate { c.sql = "not (\(c.sql))" }
             }
-            guard var c = SearchQuery.term(term, col: col, today: today) else { continue }
-            if negate { c.sql = "not (\(c.sql))" }
             groups[groups.count - 1].append(c)
         }
+        return combine(groups)
+    }
+
+    private static func combine(_ groups: [[Clause]]) -> Clause {
         let parts = groups.filter { !$0.isEmpty }.map { g in
             Clause(sql: "(" + g.map(\.sql).joined(separator: " and ") + ")", params: g.flatMap(\.params))
         }
         guard !parts.isEmpty else { return Clause(sql: "1", params: []) }
-        return Clause(sql: parts.map(\.sql).joined(separator: " or "), params: parts.flatMap(\.params))
+        return Clause(sql: "(" + parts.map(\.sql).joined(separator: " or ") + ")", params: parts.flatMap(\.params))
     }
 
     private static func term(_ term: String, col: Collection, today: Int) -> Clause? {
@@ -114,9 +153,14 @@ struct SearchQuery {
             let cutoff = (Scheduler(collection: col).timing().nextDayAt - Int64(days) * 86_400) * 1000
             return Clause(sql: "c.id > ?", params: [cutoff])
         case "rated":
-            guard let days = Int(value.split(separator: ":").first ?? "") else { return nil }
+            // rated:DAYS or rated:DAYS:EASE
+            let parts = value.split(separator: ":")
+            guard let days = Int(parts.first ?? "") else { return nil }
             let cutoff = (Scheduler(collection: col).timing().nextDayAt - Int64(days) * 86_400) * 1000
-            return Clause(sql: "c.id in (select cid from revlog where id > ?)", params: [cutoff])
+            if parts.count > 1, let ease = Int(parts[1]) {
+                return Clause(sql: "c.id in (select cid from revlog where id > ? and ease = ?)", params: [cutoff, ease])
+            }
+            return Clause(sql: "c.id in (select cid from revlog where id > ? and ease > 0)", params: [cutoff])
         case "nid":
             let ids = value.split(separator: ",").compactMap { Int64($0) }.map(String.init).joined(separator: ",")
             return Clause(sql: "n.id in (\(ids.isEmpty ? "0" : ids))", params: [])
