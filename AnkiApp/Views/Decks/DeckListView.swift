@@ -28,6 +28,13 @@ struct DeckListView: View {
                         Label("No Decks", systemImage: "rectangle.stack")
                     } description: {
                         Text("Sync with AnkiWeb, import a deck, or add a note to get started.")
+                    } actions: {
+                        Button("Import a Deck", systemImage: "square.and.arrow.down") { showImporter = true }
+                            .buttonStyle(.glassProminent)
+                        Link(destination: URL(string: "https://ankiweb.net/shared/decks")!) {
+                            Label("Browse Shared Decks", systemImage: "safari")
+                        }
+                        .buttonStyle(.glass)
                     }
                 } else {
                     Section {
@@ -49,6 +56,22 @@ struct DeckListView: View {
                 DeckOverviewView(deckID: id) { studying = StudyTarget(id: id) }
             }
             .refreshable { await app.sync() }
+            .dropDestination(for: URL.self) { urls, _ in
+                guard let url = urls.first(where: { ["apkg", "colpkg"].contains($0.pathExtension.lowercased()) }) else {
+                    return false
+                }
+                app.beginImport(url)
+                return true
+            }
+            .onChange(of: app.studyRequest) { _, id in
+                guard let id else { return }
+                app.studyRequest = nil
+                // let the import sheet finish dismissing before presenting
+                Task {
+                    try? await Task.sleep(for: .milliseconds(600))
+                    studying = StudyTarget(id: id)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     SyncButton()
@@ -60,7 +83,10 @@ struct DeckListView: View {
                             newDeckName = ""
                             showNewDeck = true
                         }
-                        Button("Import File", systemImage: "square.and.arrow.down") { showImporter = true }
+                        Button("Import Deck", systemImage: "square.and.arrow.down") { showImporter = true }
+                        Link(destination: URL(string: "https://ankiweb.net/shared/decks")!) {
+                            Label("Get Shared Decks", systemImage: "safari")
+                        }
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -74,9 +100,7 @@ struct DeckListView: View {
                 StudyView(app: app, deckID: target.id)
             }
             .fileImporter(isPresented: $showImporter, allowedContentTypes: [.apkg, .colpkg, .zip, .data]) { result in
-                if case .success(let url) = result {
-                    Task { await app.importPackage(url) }
-                }
+                if case .success(let url) = result { app.beginImport(url) }
             }
             .alert("New Deck", isPresented: $showNewDeck) {
                 TextField("Name", text: $newDeckName)

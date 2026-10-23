@@ -7,14 +7,58 @@ struct ImportResult {
     var cardsAdded = 0
     var mediaFiles = 0
     var decks: [String] = []
+    /// The first top-level deck the package's cards went into, for "Study now".
+    var primaryDeckID: Int64?
 
     var summary: String {
-        var parts = ["\(notesAdded) notes added"]
+        var parts = ["\(notesAdded) note\(notesAdded == 1 ? "" : "s") added"]
         if notesUpdated > 0 { parts.append("\(notesUpdated) updated") }
-        if notesSkipped > 0 { parts.append("\(notesSkipped) unchanged") }
-        if mediaFiles > 0 { parts.append("\(mediaFiles) media files") }
+        if notesSkipped > 0 { parts.append("\(notesSkipped) already present") }
+        if mediaFiles > 0 { parts.append("\(mediaFiles) media file\(mediaFiles == 1 ? "" : "s")") }
         return parts.joined(separator: ", ")
     }
+}
+
+/// How notes already in the collection (matched by GUID) are treated.
+enum ImportUpdatePolicy: String, CaseIterable, Identifiable {
+    case ifNewer
+    case always
+    case never
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .ifNewer: return "If newer"
+        case .always: return "Always"
+        case .never: return "Never"
+        }
+    }
+}
+
+struct ImportOptions {
+    /// Keep review history and intervals; otherwise cards are imported as new.
+    var includeScheduling = true
+    var updateNotes: ImportUpdatePolicy = .ifNewer
+}
+
+/// What a package contains, shown before importing.
+struct PackagePreview {
+    var fileName: String
+    var format: String
+    var isCollectionPackage: Bool
+    var decks: [String]
+    var notetypes: [String]
+    var notes: Int
+    var cards: Int
+    var newCards: Int
+    var studiedCards: Int
+    var revlogEntries: Int
+    var mediaFiles: Int
+    /// Notes whose GUID is already in the collection.
+    var existingNotes: Int
+
+    var hasScheduling: Bool { studiedCards > 0 || revlogEntries > 0 }
 }
 
 /// Reads `.apkg` and `.colpkg` packages in all three formats Anki writes:
@@ -65,55 +109,151 @@ struct Package {
         return map.compactMap { key, value in value.string.map { ($0, key) } }
     }
 
+    var formatDescription: String {
+        if isLatest { return "Anki 2.1.50+ package" }
+        if zip.contains("collection.anki21") { return "Anki 2.1 package" }
+        return "Legacy Anki package"
+    }
+
     func mediaData(zipName: String) throws -> Data {
         let data = try zip.read(zipName)
         return isLatest ? try Zstd.decompress(data) : data
     }
 }
 
+/// An extracted package, opened once for previewing and then importing.
+final class OpenedPackage {
+    let package: Package
+    let source: Collection
+    let preview: PackagePreview
+    private let workDir: URL
+
+    init(url: URL, existingGUIDs: (([String]) throws -> Int)? = nil) throws {
+        let pkg = try Package(url: url)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("import-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let src: Collection
+        do {
+            let dbURL = dir.appendingPathComponent("collection.anki2")
+            try pkg.extractCollection(to: dbURL)
+            src = try Collection(url: dbURL, mediaFolder: dir.appendingPathComponent("media"))
+        } catch {
+            try? FileManager.default.removeItem(at: dir)
+            throw error
+        }
+        package = pkg
+        source = src
+        workDir = dir
+        preview = try OpenedPackage.makePreview(url: url, package: pkg, source: src, existingGUIDs: existingGUIDs)
+    }
+
+    private static func makePreview(url: URL, package: Package, source: Collection,
+                                    existingGUIDs: (([String]) throws -> Int)?) throws -> PackagePreview
+    {
+        let db = source.db
+        let usedDecks = Set(try db.query("select distinct case when odid != 0 then odid else did end from cards").map { $0[0].int })
+        let deckNames = source.allDecks.filter { d in
+            usedDecks.contains(d.id) || source.childDecks(of: d.id).contains { usedDecks.contains($0.id) }
+        }.map(\.name)
+        let usedNotetypes = Set(try db.query("select distinct mid from notes").map { $0[0].int })
+        let guids = try db.query("select guid from notes").map { $0[0].text }
+        return PackagePreview(
+            fileName: url.lastPathComponent,
+            format: package.formatDescription,
+            isCollectionPackage: url.pathExtension.lowercased() == "colpkg",
+            decks: deckNames,
+            notetypes: usedNotetypes.compactMap { source.notetype($0)?.name }.sorted(),
+            notes: Int(try db.int("select count() from notes")),
+            cards: Int(try db.int("select count() from cards")),
+            newCards: Int(try db.int("select count() from cards where type = 0")),
+            studiedCards: Int(try db.int("select count() from cards where type != 0")),
+            revlogEntries: Int(try db.int("select count() from revlog")),
+            mediaFiles: (try? package.mediaEntries().count) ?? 0,
+            existingNotes: try existingGUIDs?(guids) ?? 0)
+    }
+
+    private var closed = false
+
+    func close() {
+        guard !closed else { return }
+        closed = true
+        source.close()
+        try? FileManager.default.removeItem(at: workDir)
+    }
+
+    deinit { close() }
+}
+
 final class PackageImporter {
     let col: Collection
     let media: MediaManager?
-    var progress: (String) -> Void = { _ in }
+    /// Reports a stage description and overall progress from 0 to 1.
+    var progress: (String, Double) -> Void = { _, _ in }
 
     init(collection: Collection, media: MediaManager?) {
         col = collection
         self.media = media
     }
 
-    /// Merges an `.apkg` into the collection, like Anki's importer: notes are
-    /// matched by GUID, notetypes and decks by id/name, and scheduling is
-    /// kept.
-    func importApkg(_ url: URL) throws -> ImportResult {
-        progress("Reading package…")
-        let pkg = try Package(url: url)
-        let srcURL = col.url.deletingLastPathComponent().appendingPathComponent("import-\(UUID().uuidString).anki2")
-        defer {
-            try? FileManager.default.removeItem(at: srcURL)
+    /// How many of `guids` are already in the collection.
+    func countExisting(guids: [String]) throws -> Int {
+        var count = 0
+        for chunk in stride(from: 0, to: guids.count, by: 500) {
+            let slice = Array(guids[chunk..<min(chunk + 500, guids.count)])
+            let marks = slice.map { _ in "?" }.joined(separator: ",")
+            count += Int(try col.db.int("select count() from notes where guid in (\(marks))", params: slice))
         }
-        try pkg.extractCollection(to: srcURL)
-        let src = try Collection(url: srcURL, mediaFolder: col.mediaFolder.deletingLastPathComponent()
-            .appendingPathComponent("import-media-unused"))
-        defer {
-            src.close()
-            try? FileManager.default.removeItem(at: col.mediaFolder.deletingLastPathComponent().appendingPathComponent("import-media-unused"))
-        }
+        return count
+    }
 
+    /// Opens, imports and closes an `.apkg` in one step.
+    func importApkg(_ url: URL, options: ImportOptions = ImportOptions()) throws -> ImportResult {
+        let opened = try OpenedPackage(url: url)
+        defer { opened.close() }
+        return try importPackage(opened, options: options)
+    }
+
+    /// Merges a package into the collection like Anki's importer: notes are
+    /// matched by GUID, notetypes by id or name and fields, and decks by name.
+    func importPackage(_ opened: OpenedPackage, options: ImportOptions) throws -> ImportResult {
+        let src = opened.source
         var result = ImportResult()
-        progress("Importing notes…")
+
+        // media first, so renamed files can be rewritten in incoming notes
+        progress("Importing media…", 0)
+        let renames = try importMedia(opened.package, result: &result)
+
+        progress("Importing notes…", 0.3)
         try col.db.transaction {
             let notetypeMap = try mapNotetypes(from: src)
             let deckMap = try mapDecks(from: src, result: &result)
-            let dayOffset = Int64((src.crt - col.crt) / 86_400)
-            let positionOffset = col.conf["nextPos"].int(or: 1)
-            var maxPos: Int64 = positionOffset
+            let dayOffset = Int64((Double(src.crt - col.crt) / 86_400).rounded())
+            var nextPos = col.conf["nextPos"].int(or: 1)
+            // new cards keep their relative order, packed after existing ones
+            var positionMap: [Int64: Int64] = [:]
+            for pos in try src.db.query("select distinct due from cards where type = 0 order by due").map({ $0[0].int }) {
+                positionMap[pos] = nextPos
+                nextPos += 1
+            }
 
-            var importedNotes = Set<Int64>()
             let notes = try src.db.query("select \(Note.columns) from notes").map(Note.init(row:))
-            for var note in notes {
+            for (index, srcNote) in notes.enumerated() {
+                if index % 200 == 0 {
+                    progress("Importing notes… \(index)/\(notes.count)", 0.3 + 0.7 * Double(index) / Double(max(1, notes.count)))
+                }
+                var note = srcNote
                 guard let mid = notetypeMap[note.mid] else { continue }
+                if !renames.isEmpty {
+                    note.fields = note.fields.map { PackageImporter.rewriteMedia($0, renames) }
+                }
                 if let existing = try col.note(guid: note.guid) {
-                    if existing.mid == mid, note.mod > existing.mod, existing.fields.count == note.fields.count {
+                    let update: Bool
+                    switch options.updateNotes {
+                    case .always: update = existing.fields != note.fields || existing.tags != note.tags
+                    case .ifNewer: update = note.mod > existing.mod
+                    case .never: update = false
+                    }
+                    if update, existing.mid == mid, existing.fields.count == note.fields.count {
                         var updated = existing
                         updated.fields = note.fields
                         updated.tags = note.tags
@@ -134,14 +274,12 @@ final class PackageImporter {
                 note.mid = mid
                 note.usn = -1
                 note.mod = Time.nowSecs
-                let nt = col.notetype(mid)
-                let fieldCount = nt?.fieldNames.count ?? note.fields.count
+                let fieldCount = col.notetype(mid)?.fieldNames.count ?? note.fields.count
                 if note.fields.count < fieldCount {
                     note.fields += Array(repeating: "", count: fieldCount - note.fields.count)
                 }
                 try col.writeNote(note)
                 col.registerTags(note.tags)
-                importedNotes.insert(note.id)
                 result.notesAdded += 1
 
                 for var card in try src.db.query("select \(Card.columns) from cards where nid = ?", oldID).map(Card.init(row:)) {
@@ -159,19 +297,26 @@ final class PackageImporter {
                         if card.queue == CardQueue.preview { card.queue = card.type }
                     }
                     card.did = deckMap[card.did] ?? 1
-                    switch card.queue {
-                    case CardQueue.review, CardQueue.dayLearn:
+                    if result.primaryDeckID == nil { result.primaryDeckID = card.did }
+                    if !options.includeScheduling && card.type != CardType.new {
+                        PackageImporter.resetToNew(&card, position: nextPos)
+                        nextPos += 1
+                    } else if card.type == CardType.new {
+                        card.due = positionMap[card.due] ?? nextPos
+                    } else if card.queue == CardQueue.review || card.queue == CardQueue.dayLearn
+                        || (card.queue < 0 && card.type == CardType.review)
+                    {
                         card.due += dayOffset
-                    case CardQueue.new:
-                        card.due = positionOffset + (card.due - 1)
-                        maxPos = max(maxPos, card.due + 1)
-                    default:
-                        if card.type == CardType.review { card.due += dayOffset }
+                    }
+                    if !options.includeScheduling {
+                        card.flags = 0
+                        if card.queue < 0 { card.queue = CardQueue.new }
                     }
                     card.usn = -1
                     card.mod = Time.nowSecs
                     try col.writeCard(card)
                     result.cardsAdded += 1
+                    guard options.includeScheduling else { continue }
                     for var entry in try src.db.query("select \(RevlogEntry.columns) from revlog where cid = ?", oldCardID)
                         .map(RevlogEntry.init(row:))
                     {
@@ -182,13 +327,35 @@ final class PackageImporter {
                     }
                 }
             }
-            col.conf["nextPos"] = .int(max(maxPos, positionOffset))
+            col.conf["nextPos"] = .int(nextPos)
             try col.save()
         }
-
-        progress("Importing media…")
-        result.mediaFiles = try importMedia(pkg)
+        progress("Done", 1)
         return result
+    }
+
+    static func resetToNew(_ card: inout Card, position: Int64) {
+        card.type = CardType.new
+        card.queue = CardQueue.new
+        card.due = position
+        card.ivl = 0
+        card.factor = 0
+        card.reps = 0
+        card.lapses = 0
+        card.left = 0
+        card.data = "{}"
+    }
+
+    /// Replaces references to renamed media files in a field.
+    static func rewriteMedia(_ field: String, _ renames: [String: String]) -> String {
+        var out = field
+        for (old, new) in renames where out.contains(old) {
+            out = out.replacingOccurrences(of: "\"\(old)\"", with: "\"\(new)\"")
+                .replacingOccurrences(of: "'\(old)'", with: "'\(new)'")
+                .replacingOccurrences(of: "src=\(old)", with: "src=\(new)")
+                .replacingOccurrences(of: "[sound:\(old)]", with: "[sound:\(new)]")
+        }
+        return out
     }
 
     private func mapNotetypes(from src: Collection) throws -> [Int64: Int64] {
@@ -266,18 +433,26 @@ final class PackageImporter {
         return map
     }
 
-    private func importMedia(_ pkg: Package) throws -> Int {
-        guard let media else { return 0 }
-        var count = 0
-        for entry in try pkg.mediaEntries() {
+    /// Copies package media into the media folder. A different file that
+    /// already uses a name gets the incoming file renamed; the returned map
+    /// lists those renames.
+    private func importMedia(_ pkg: Package, result: inout ImportResult) throws -> [String: String] {
+        guard let media else { return [:] }
+        var renames: [String: String] = [:]
+        let entries = try pkg.mediaEntries()
+        for (i, entry) in entries.enumerated() {
+            if i % 50 == 0 { progress("Importing media… \(i)/\(entries.count)", 0.3 * Double(i) / Double(max(1, entries.count))) }
             let name = MediaManager.normalize(entry.name)
             guard MediaManager.isSafe(name), pkg.zip.contains(entry.zipName) else { continue }
             let data = try pkg.mediaData(zipName: entry.zipName)
-            if media.fileExists(name), let existing = try? Data(contentsOf: media.url(for: name)), existing == data { continue }
-            try media.addFile(name: name, data: data)
-            count += 1
+            guard !data.isEmpty else { continue }
+            let (stored, exists) = media.resolveName(name, data: data)
+            if stored != entry.name { renames[entry.name] = stored }
+            if exists { continue }
+            try media.addFile(name: stored, data: data)
+            result.mediaFiles += 1
         }
-        return count
+        return renames
     }
 
     /// Replaces the whole collection with a `.colpkg` backup. Returns the
@@ -294,7 +469,7 @@ final class PackageImporter {
             for entry in try pkg.mediaEntries() {
                 let name = MediaManager.normalize(entry.name)
                 guard MediaManager.isSafe(name), pkg.zip.contains(entry.zipName) else { continue }
-                try media.addFile(name: name, data: try pkg.mediaData(zipName: entry.zipName))
+                try media.replaceFile(name: name, data: try pkg.mediaData(zipName: entry.zipName))
             }
         }
         return dest
