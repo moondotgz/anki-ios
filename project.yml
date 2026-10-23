@@ -1,0 +1,95 @@
+name: AnkiSwift
+options:
+  bundleIdPrefix: com.moondotgz
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+packages:
+  zstd:
+    url: https://github.com/facebook/zstd.git
+    from: "1.5.7"
+
+targets:
+  AnkiSwift:
+    type: application
+    platform: iOS
+    sources:
+      - path: AnkiApp
+    dependencies:
+      - package: zstd
+        product: libzstd
+      - sdk: libsqlite3.tbd
+    info:
+      path: Supporting/Info.plist
+      properties:
+        CFBundleDisplayName: Anki
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: false
+        NSPhotoLibraryUsageDescription: Add images from your photo library to your notes.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Anki Deck Package
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - net.ankiweb.apkg
+          - CFBundleTypeName: Anki Collection Package
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - net.ankiweb.colpkg
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: net.ankiweb.apkg
+            UTTypeDescription: Anki Deck Package
+            UTTypeConformsTo:
+              - public.zip-archive
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - apkg
+          - UTTypeIdentifier: net.ankiweb.colpkg
+            UTTypeDescription: Anki Collection Package
+            UTTypeConformsTo:
+              - public.zip-archive
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - colpkg
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.moondotgz.ankiswift
+        PRODUCT_NAME: AnkiSwift
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_PREVIEWS: YES
+        SWIFT_STRICT_CONCURRENCY: minimal
+        CODE_SIGN_STYLE: Automatic
+    scheme:
+      configurations:
+        Debug: Debug
+        Release: Release
