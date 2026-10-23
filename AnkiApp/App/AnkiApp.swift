@@ -10,7 +10,7 @@ struct AnkiApp: App {
             RootView()
                 .environment(app)
                 .onOpenURL { url in
-                    Task { await app.importPackage(url) }
+                    app.beginImport(url)
                 }
                 .task {
                     if app.autoSync && app.isLoggedIn { await app.sync() }
@@ -36,17 +36,17 @@ struct RootView: View {
 
     var body: some View {
         @Bindable var app = app
-        TabView {
-            Tab("Decks", systemImage: "rectangle.stack.fill") {
+        TabView(selection: $app.selectedTab) {
+            Tab("Decks", systemImage: "rectangle.stack.fill", value: AppTab.decks) {
                 DeckListView()
             }
-            Tab("Browse", systemImage: "magnifyingglass") {
+            Tab("Browse", systemImage: "magnifyingglass", value: AppTab.browse) {
                 BrowseView()
             }
-            Tab("Stats", systemImage: "chart.bar.fill") {
+            Tab("Stats", systemImage: "chart.bar.fill", value: AppTab.stats) {
                 StatsView()
             }
-            Tab("Settings", systemImage: "gearshape.fill") {
+            Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) {
                 SettingsView()
             }
         }
@@ -82,6 +82,10 @@ struct RootView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(app.infoMessage ?? "")
+        }
+        .sheet(item: $app.importRequest) { request in
+            ImportView(request: request)
+                .presentationDetents([.large])
         }
         .sheet(item: $app.fullSyncPrompt) { prompt in
             FullSyncSheet(prompt: prompt)

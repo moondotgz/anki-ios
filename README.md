@@ -8,7 +8,7 @@ A native Anki flashcard app for iOS and iPadOS, written in Swift and SwiftUI wit
 - **Collection format.** The app stores an Anki schema 11 collection. Full downloads from AnkiWeb arrive in schema 18 and are converted, including the protobuf notetype, deck and deck-options data.
 - **Scheduler.** A port of Anki's v3 SM-2 scheduler: learning and relearning steps, interval fuzz, ease changes, hard/easy multipliers, lapses and leeches, burying siblings, daily limits (including subdeck and parent limits), and day rollover.
 - **Card rendering** handles Anki templates: fields, conditionals, `FrontSide`, `cloze` (including nested and hints), `type:` answers with a diff, `hint:`, `text:`, furigana filters, `[sound:]` audio, images, and notetype CSS with night mode.
-- **Import and export.** It imports `.apkg` and `.colpkg` in all three formats (legacy `anki2`, `anki21`, and zstd `anki21b`) and exports decks as `.apkg`.
+- **Import and export.** It imports `.apkg` decks (including AnkiWeb shared decks) and `.colpkg` backups in all three formats Anki writes (legacy `anki2`, `anki21`, and zstd `anki21b`), and exports decks as `.apkg`. Before importing, it shows what the package contains: decks, note types, notes, cards, media, and how many notes you already have. You can choose whether to keep learning progress and when to update existing notes. If a media file name is already taken by a different file, the incoming file is renamed and the notes that use it are updated. You can open packages from the + menu, from Files, Safari or AirDrop ("Open in Anki"), or by dragging them onto the deck list on iPad.
 - **Other tools:** add and edit notes (with images from Photos), a browser with Anki-style search (`deck:`, `tag:`, `is:due`, `flag:`, `prop:ivl>10`, …), deck options presets, statistics, undo, flags, bury and suspend.
 
 ## Building
@@ -23,9 +23,26 @@ open AnkiSwift.xcodeproj
 
 You need Xcode 26 or later; the deployment target is iOS 26. The only dependency is [zstd](https://github.com/facebook/zstd), which Swift Package Manager fetches.
 
+### Install with SideStore or AltStore
+
+Add this source in SideStore or AltStore (Sources → Add Source):
+
+```
+https://moondotgz.github.io/anki-ios/apps.json
+```
+
+Or open https://moondotgz.github.io/anki-ios/ on your iPhone and tap **Add to SideStore** / **Add to AltStore**. The page also links the latest IPA and lists previous builds.
+
 ### CI
 
-`.github/workflows/build-ipa.yml` runs on GitHub's `xcode-27` runner. It generates the project, builds a Release app without code signing, and uploads `AnkiSwift-unsigned.ipa` as a workflow artifact. Sign the IPA yourself, for example with AltStore, Sideloadly or `codesign`, before installing it.
+`.github/workflows/build-ipa.yml` runs on GitHub's `xcode-27` runner. It generates the project, builds a Release app without code signing, and uploads `AnkiSwift-unsigned.ipa` as a workflow artifact. The workflow run number becomes the build number (`CFBundleVersion`); the version comes from `MARKETING_VERSION` in `project.yml`.
+
+On pushes to `main` it also:
+
+1. publishes the IPA as a GitHub release tagged `build-<run number>`, with the commit message as release notes;
+2. rebuilds the source from all `build-*` releases with `scripts/make_source.py`, and deploys it to GitHub Pages together with the page in `site/`.
+
+SideStore and AltStore sign the IPA when they install it. To sideload it another way, sign it yourself, for example with Sideloadly or `codesign`.
 
 ## Layout
 

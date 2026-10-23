@@ -39,22 +39,42 @@ final class MediaManager {
         return Int64((attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)
     }
 
+    /// Picks the name a file should be stored under: its own name, or a
+    /// name with a hash suffix if a different file already uses it.
+    /// `exists` is true when a file with the same content is already there.
+    func resolveName(_ rawName: String, data: Data) -> (name: String, exists: Bool) {
+        var name = MediaManager.normalize((rawName as NSString).lastPathComponent)
+        if name.isEmpty { name = "pasted-\(UUID().uuidString)" }
+        let sha = SHA1.hex(data)
+        func sameContent(_ n: String) -> Bool {
+            guard let existing = try? Data(contentsOf: url(for: n)) else { return false }
+            return existing.count == data.count && SHA1.hex(existing) == sha
+        }
+        guard fileExists(name) else { return (name, false) }
+        if sameContent(name) { return (name, true) }
+        let ext = (name as NSString).pathExtension
+        let base = (name as NSString).deletingPathExtension
+        let alt = "\(base)-\(sha.prefix(8))" + (ext.isEmpty ? "" : ".\(ext)")
+        return (alt, fileExists(alt) && sameContent(alt))
+    }
+
     /// Adds a file to the media folder, renaming it if a different file
     /// already has that name. Returns the name actually used.
     @discardableResult
     func addFile(name rawName: String, data: Data) throws -> String {
-        var name = MediaManager.normalize((rawName as NSString).lastPathComponent)
-        if name.isEmpty { name = "pasted-\(UUID().uuidString)" }
-        let sha = SHA1.hex(data)
-        if fileExists(name) {
-            if let existing = try? Data(contentsOf: url(for: name)), SHA1.hex(existing) == sha { return name }
-            let ext = (name as NSString).pathExtension
-            let base = (name as NSString).deletingPathExtension
-            name = "\(base)-\(sha.prefix(8))" + (ext.isEmpty ? "" : ".\(ext)")
-        }
+        let (name, exists) = resolveName(rawName, data: data)
+        if exists { return name }
         try data.write(to: url(for: name), options: .atomic)
-        try db.execute("insert or replace into media values (?, ?, ?, 1)", name, sha, mtime(url(for: name)))
+        try db.execute("insert or replace into media values (?, ?, ?, 1)", name, SHA1.hex(data), mtime(url(for: name)))
         return name
+    }
+
+    /// Writes a file under exactly this name, replacing any existing file,
+    /// and marks it for upload. Used when restoring a backup.
+    func replaceFile(name: String, data: Data) throws {
+        let fileURL = url(for: name)
+        try data.write(to: fileURL, options: .atomic)
+        try db.execute("insert or replace into media values (?, ?, ?, 1)", name, SHA1.hex(data), mtime(fileURL))
     }
 
     /// Writes a file received from the server, without marking it for upload.

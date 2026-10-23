@@ -122,7 +122,8 @@ struct SettingsView: View {
                 }
 
                 Section("Collection") {
-                    Button("Import .apkg / .colpkg", systemImage: "square.and.arrow.down") { showImporter = true }
+                    Button("Import Deck (.apkg)", systemImage: "square.and.arrow.down") { showImporter = true }
+                    Button("Restore Backup (.colpkg)", systemImage: "archivebox") { showImporter = true }
                     Button("Check Database", systemImage: "stethoscope") { app.checkDatabase() }
                     LabeledContent("Cards", value: "\(app.col?.cardCount ?? 0)")
                     LabeledContent("Notes", value: "\(app.col?.noteCount ?? 0)")
@@ -140,7 +141,7 @@ struct SettingsView: View {
                 NavigationStack { LoginView() }
             }
             .fileImporter(isPresented: $showImporter, allowedContentTypes: [.apkg, .colpkg, .zip, .data]) { result in
-                if case .success(let url) = result { Task { await app.importPackage(url) } }
+                if case .success(let url) = result { app.beginImport(url) }
             }
             .confirmationDialog("Replace AnkiWeb's copy with this device's collection?",
                                 isPresented: $confirmUpload, titleVisibility: .visible) {

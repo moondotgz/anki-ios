@@ -2,6 +2,18 @@ import Foundation
 import Observation
 import SwiftUI
 
+enum AppTab: Hashable {
+    case decks, browse, stats, settings
+}
+
+/// A package file chosen for import, copied into the app's temporary folder.
+struct ImportRequest: Identifiable {
+    let id = UUID()
+    let fileURL: URL
+    let displayName: String
+    var isCollectionPackage: Bool { fileURL.pathExtension.lowercased() == "colpkg" }
+}
+
 struct FullSyncPrompt: Identifiable {
     let id = UUID()
     let uploadOK: Bool
@@ -25,7 +37,12 @@ final class AppModel {
     var fullSyncPrompt: FullSyncPrompt?
     var isSyncing = false
     var syncProgress = ""
-    var pendingImport: URL?
+    var importRequest: ImportRequest?
+    /// Set while an import writes to the collection; sync and refresh wait.
+    private(set) var isImporting = false
+    var selectedTab: AppTab = .decks
+    /// A deck to start studying, e.g. after importing it.
+    var studyRequest: Int64?
 
     // Preferences live in UserDefaults; access/withMutation keep them observable.
     var username: String {
@@ -77,7 +94,7 @@ final class AppModel {
     }
 
     func refresh() {
-        guard let col else { return }
+        guard let col, !isImporting else { return }
         deckTree = Scheduler(collection: col).deckTree()
         revision += 1
     }
@@ -131,7 +148,7 @@ final class AppModel {
     }
 
     func sync() async {
-        guard let col, let hostKey, !isSyncing else { return }
+        guard let col, let hostKey, !isSyncing, !isImporting else { return }
         isSyncing = true
         syncProgress = "Syncing…"
         defer {
@@ -215,50 +232,93 @@ final class AppModel {
 
     // MARK: Import / export
 
-    func importPackage(_ url: URL) async {
+    /// Starts importing a file from the file picker, Files, AirDrop, Safari or
+    /// another app. The file is copied right away, while access is granted.
+    func beginImport(_ url: URL) {
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-        try? FileManager.default.removeItem(at: tmp)
+        let fm = FileManager.default
+        let folder = fm.temporaryDirectory.appendingPathComponent("imports", isDirectory: true)
+        let ext = url.pathExtension.isEmpty ? "apkg" : url.pathExtension.lowercased()
+        let copy = folder.appendingPathComponent("\(UUID().uuidString).\(ext)")
         do {
-            try FileManager.default.copyItem(at: url, to: tmp)
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            try fm.copyItem(at: url, to: copy)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "Couldn't read “\(url.lastPathComponent)”: \(error.localizedDescription)"
             return
         }
-        defer { try? FileManager.default.removeItem(at: tmp) }
+        // files opened from other apps arrive in Documents/Inbox; don't keep them
+        if url.path.contains("/Documents/Inbox/") { try? fm.removeItem(at: url) }
+        if let old = importRequest { try? fm.removeItem(at: old.fileURL) }
+        selectedTab = .decks
+        importRequest = ImportRequest(fileURL: copy, displayName: url.lastPathComponent)
+    }
 
-        if url.pathExtension.lowercased() == "colpkg" {
-            busyMessage = "Restoring collection…"
-            defer { busyMessage = nil }
-            do {
-                let media = self.media
-                let colURL = AppModel.collectionURL
-                let newURL = try await Task.detached {
-                    try PackageImporter.extractColpkg(tmp, besides: colURL, media: media)
-                }.value
-                replaceCollection(with: newURL)
-                infoMessage = "Collection restored. Your next sync will ask whether to upload it to AnkiWeb."
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-            return
-        }
+    func finishImport(_ request: ImportRequest) {
+        try? FileManager.default.removeItem(at: request.fileURL)
+        if importRequest?.id == request.id { importRequest = nil }
+        refresh()
+    }
 
-        guard let col else { return }
-        busyMessage = "Importing…"
+    /// Extracts a package off the main thread for previewing.
+    func openPackage(_ request: ImportRequest) async throws -> OpenedPackage {
+        let url = request.fileURL
+        return try await Task.detached(priority: .userInitiated) {
+            try OpenedPackage(url: url)
+        }.value
+    }
+
+    /// How many notes in the package are already in the collection.
+    func existingNoteCount(in opened: OpenedPackage) -> Int {
+        guard let col else { return 0 }
+        let guids = (try? opened.source.db.query("select guid from notes").map { $0[0].text }) ?? []
+        return (try? PackageImporter(collection: col, media: nil).countExisting(guids: guids)) ?? 0
+    }
+
+    /// Merges an opened `.apkg` into the collection.
+    func runImport(_ opened: OpenedPackage, options: ImportOptions,
+                   progress: @escaping @MainActor (String, Double) -> Void) async -> ImportResult?
+    {
+        guard let col, !isImporting else { return nil }
+        isImporting = true
         defer {
-            busyMessage = nil
+            isImporting = false
             refresh()
         }
+        let media = self.media
         do {
-            let media = self.media
-            let result = try await Task.detached {
-                try PackageImporter(collection: col, media: media).importApkg(tmp)
+            return try await Task.detached(priority: .userInitiated) {
+                let importer = PackageImporter(collection: col, media: media)
+                importer.progress = { stage, fraction in
+                    Task { @MainActor in progress(stage, fraction) }
+                }
+                return try importer.importPackage(opened, options: options)
             }.value
-            infoMessage = "Import complete: \(result.summary)."
         } catch {
             errorMessage = "Import failed: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// Replaces the whole collection with a `.colpkg` backup.
+    func restoreCollection(_ request: ImportRequest) async -> Bool {
+        guard !isImporting else { return false }
+        isImporting = true
+        defer { isImporting = false }
+        do {
+            let media = self.media
+            let colURL = AppModel.collectionURL
+            let source = request.fileURL
+            let newURL = try await Task.detached(priority: .userInitiated) {
+                try PackageImporter.extractColpkg(source, besides: colURL, media: media)
+            }.value
+            isImporting = false
+            replaceCollection(with: newURL)
+            return true
+        } catch {
+            errorMessage = "Restore failed: \(error.localizedDescription)"
+            return false
         }
     }
 

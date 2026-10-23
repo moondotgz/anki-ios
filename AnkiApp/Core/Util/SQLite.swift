@@ -203,6 +203,10 @@ final class Database {
     }
 
     func first(_ sql: String, _ params: SQLBindable?...) throws -> SQLRow? {
+        try first(sql, params: params)
+    }
+
+    func first(_ sql: String, params: [SQLBindable?]) throws -> SQLRow? {
         var result: SQLRow?
         let stmt = try prepare(sql)
         defer { sqlite3_reset(stmt) }
@@ -225,6 +229,10 @@ final class Database {
         if rc == SQLITE_ROW { return column(stmt, 0) }
         if rc != SQLITE_DONE { throw error(rc) }
         return .null
+    }
+
+    func int(_ sql: String, params: [SQLBindable?]) throws -> Int64 {
+        try first(sql, params: params)?.first?.int ?? 0
     }
 
     func int(_ sql: String, _ params: SQLBindable?...) throws -> Int64 {
