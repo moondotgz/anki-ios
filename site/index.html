@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AnkiSwift</title>
+<meta name="description" content="Unofficial Anki-compatible flashcard app for iPhone and iPad. Install with SideStore or AltStore.">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<style>
+  :root {
+    --bg: #eef2fb;
+    --bg2: #dfe6fb;
+    --text: #111827;
+    --muted: #5b6474;
+    --glass: rgba(255, 255, 255, 0.55);
+    --glass-border: rgba(255, 255, 255, 0.8);
+    --shadow: 0 10px 40px rgba(40, 60, 120, 0.15);
+    --accent: #346ef5;
+    --accent-text: #ffffff;
+    --code: rgba(15, 23, 42, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0f1a;
+      --bg2: #141a2e;
+      --text: #f2f4f8;
+      --muted: #9aa3b5;
+      --glass: rgba(40, 48, 70, 0.45);
+      --glass-border: rgba(255, 255, 255, 0.12);
+      --shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+      --accent: #5b8bff;
+      --code: rgba(255, 255, 255, 0.08);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    min-height: 100vh;
+    line-height: 1.5;
+    overflow-x: hidden;
+  }
+  .backdrop {
+    position: fixed; inset: 0; z-index: -1; overflow: hidden;
+    background: linear-gradient(160deg, var(--bg) 0%, var(--bg2) 100%);
+  }
+  .blob { position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.55; }
+  .blob.a { width: 420px; height: 420px; background: #3b82f6; top: -120px; left: -100px; }
+  .blob.b { width: 360px; height: 360px; background: #8b5cf6; top: 30%; right: -120px; }
+  .blob.c { width: 300px; height: 300px; background: #22c55e; bottom: -120px; left: 20%; opacity: 0.3; }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 16px 64px; }
+  .glass {
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: 28px;
+    box-shadow: var(--shadow);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
+  }
+  header.hero { padding: 32px 24px; text-align: center; }
+  header.hero img { width: 112px; height: 112px; border-radius: 26px; box-shadow: 0 8px 24px rgba(40, 70, 200, 0.35); }
+  h1 { font-size: 2.2rem; margin: 16px 0 4px; letter-spacing: -0.02em; }
+  .subtitle { color: var(--muted); margin: 0 0 6px; font-size: 1.05rem; }
+  .version { color: var(--muted); font-size: 0.9rem; margin: 0 0 22px; min-height: 1.4em; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 12px 20px; border-radius: 999px; font-weight: 600; font-size: 1rem;
+    text-decoration: none; color: var(--text); background: var(--glass);
+    border: 1px solid var(--glass-border); cursor: pointer;
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+  .btn.primary { background: var(--accent); color: var(--accent-text); border-color: transparent; }
+  .btn[aria-disabled="true"] { opacity: 0.5; pointer-events: none; }
+  section { margin-top: 20px; padding: 24px; }
+  h2 { margin: 0 0 12px; font-size: 1.2rem; }
+  p, li { color: var(--text); }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  ul.features { margin: 0; padding-left: 1.2em; }
+  ul.features li { margin: 4px 0; }
+  .source-url { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+  .source-url code {
+    flex: 1 1 280px; min-width: 0; padding: 12px 14px; border-radius: 14px; background: var(--code);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem;
+    overflow-wrap: anywhere;
+  }
+  ol.steps { padding-left: 1.3em; margin: 0; }
+  ol.steps li { margin: 6px 0; }
+  .versions { list-style: none; padding: 0; margin: 0; }
+  .versions li { padding: 12px 0; border-top: 1px solid var(--glass-border); }
+  .versions li:first-child { border-top: none; padding-top: 0; }
+  .versions .row { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .versions .notes { color: var(--muted); font-size: 0.92rem; white-space: pre-line; margin-top: 4px; }
+  .versions a { color: var(--accent); font-weight: 600; text-decoration: none; }
+  footer { text-align: center; color: var(--muted); font-size: 0.85rem; margin-top: 28px; }
+  footer a { color: inherit; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 10px 18px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  @media (max-width: 480px) {
+    main { padding-top: 24px; }
+    h1 { font-size: 1.8rem; }
+    .btn { flex: 1 1 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="backdrop"><div class="blob a"></div><div class="blob b"></div><div class="blob c"></div></div>
+<main>
+  <header class="hero glass">
+    <img src="icon.png" alt="" width="112" height="112">
+    <h1>AnkiSwift</h1>
+    <p class="subtitle">Unofficial Anki-compatible flashcards for iPhone and iPad, with Liquid Glass.</p>
+    <p class="version" id="version">Loading latest version…</p>
+    <div class="buttons">
+      <a class="btn primary" id="add-sidestore" href="#">Add to SideStore</a>
+      <a class="btn" id="add-altstore" href="#">Add to AltStore</a>
+      <a class="btn" id="download" href="#" aria-disabled="true">Download IPA</a>
+    </div>
+  </header>
+
+  <section class="glass">
+    <h2>Source URL</h2>
+    <p class="muted">Paste this into SideStore or AltStore under Sources → Add Source.</p>
+    <div class="source-url">
+      <code id="source-url"></code>
+      <button class="btn" id="copy" type="button">Copy</button>
+    </div>
+  </section>
+
+  <section class="glass">
+    <h2>Install</h2>
+    <ol class="steps">
+      <li>Install <a href="https://sidestore.io">SideStore</a> or <a href="https://altstore.io">AltStore</a> on your device.</li>
+      <li>Tap <strong>Add to SideStore</strong> or <strong>Add to AltStore</strong> above on your iPhone or iPad, or add the source URL by hand.</li>
+      <li>Open the source and install <strong>AnkiSwift</strong>. Updates show up in the app's Updates tab.</li>
+    </ol>
+    <p class="muted">Requires iOS 26 or later. Each build is also available as an unsigned IPA on the <a id="releases" href="#">releases page</a>.</p>
+  </section>
+
+  <section class="glass">
+    <h2>Features</h2>
+    <ul class="features">
+      <li>Two-way sync with AnkiWeb or a self-hosted Anki sync server, including media</li>
+      <li>Anki's v3 SM-2 scheduler: learning steps, fuzz, leeches, burying and daily limits</li>
+      <li>Anki templates: cloze, type-in answers, hints, furigana, audio, images and night mode</li>
+      <li>Import .apkg decks (including AnkiWeb shared decks) and .colpkg backups, export .apkg</li>
+      <li>Note editor, card browser with Anki search syntax, deck options and statistics</li>
+    </ul>
+  </section>
+
+  <section class="glass">
+    <h2>Versions</h2>
+    <ul class="versions" id="versions"><li class="muted">Loading…</li></ul>
+  </section>
+
+  <footer>
+    <p>Not affiliated with Ankitects. Anki is a trademark of Ankitects Pty Ltd.<br>
+    <a id="repo" href="#">Source code on GitHub</a></p>
+  </footer>
+</main>
+<div class="toast glass" id="toast">Copied</div>
+<script>
+  (function () {
+    var base = new URL(".", location.href);
+    var sourceURL = new URL("apps.json", base).href;
+    var parts = location.hostname.split(".");
+    var owner = parts[0];
+    var repo = location.pathname.split("/").filter(Boolean)[0] || "";
+    var repoURL = "https://github.com/" + owner + "/" + repo;
+
+    document.getElementById("source-url").textContent = sourceURL;
+    document.getElementById("add-sidestore").href = "sidestore://source?url=" + encodeURIComponent(sourceURL);
+    document.getElementById("add-altstore").href = "altstore://source?url=" + encodeURIComponent(sourceURL);
+    document.getElementById("releases").href = repoURL + "/releases";
+    document.getElementById("repo").href = repoURL;
+
+    var toast = document.getElementById("toast");
+    document.getElementById("copy").addEventListener("click", function () {
+      var done = function () {
+        toast.classList.add("show");
+        setTimeout(function () { toast.classList.remove("show"); }, 1400);
+      };
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(sourceURL).then(done, function () {});
+      }
+    });
+
+    function formatSize(bytes) {
+      return bytes ? (bytes / 1048576).toFixed(1) + " MB" : "";
+    }
+
+    function formatDate(iso) {
+      var d = new Date(iso);
+      return isNaN(d) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    }
+
+    fetch(sourceURL, { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (source) {
+        var app = source.apps && source.apps[0];
+        var versions = (app && app.versions) || [];
+        var list = document.getElementById("versions");
+        list.innerHTML = "";
+        if (!versions.length) {
+          document.getElementById("version").textContent = "No builds published yet.";
+          list.innerHTML = '<li class="muted">No builds published yet.</li>';
+          return;
+        }
+        var latest = versions[0];
+        document.getElementById("version").textContent =
+          "Version " + latest.version + " (" + latest.buildVersion + ") · " + formatDate(latest.date) + " · " + formatSize(latest.size);
+        var dl = document.getElementById("download");
+        dl.href = latest.downloadURL;
+        dl.removeAttribute("aria-disabled");
+        versions.slice(0, 15).forEach(function (v) {
+          var li = document.createElement("li");
+          var row = document.createElement("div");
+          row.className = "row";
+          var title = document.createElement("strong");
+          title.textContent = v.version + " (" + v.buildVersion + ")";
+          var meta = document.createElement("span");
+          meta.className = "muted";
+          meta.textContent = formatDate(v.date) + " · ";
+          var link = document.createElement("a");
+          link.href = v.downloadURL;
+          link.textContent = "IPA";
+          meta.appendChild(link);
+          row.appendChild(title);
+          row.appendChild(meta);
+          li.appendChild(row);
+          if (v.localizedDescription) {
+            var notes = document.createElement("div");
+            notes.className = "notes";
+            notes.textContent = v.localizedDescription;
+            li.appendChild(notes);
+          }
+          list.appendChild(li);
+        });
+      })
+      .catch(function () {
+        document.getElementById("version").textContent = "Couldn't load the source.";
+        document.getElementById("versions").innerHTML = '<li class="muted">Couldn\'t load the source.</li>';
+      });
+  })();
+</script>
+</body>
+</html>

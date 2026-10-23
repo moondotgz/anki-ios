@@ -23,9 +23,26 @@ open AnkiSwift.xcodeproj
 
 You need Xcode 26 or later; the deployment target is iOS 26. The only dependency is [zstd](https://github.com/facebook/zstd), which Swift Package Manager fetches.
 
+### Install with SideStore or AltStore
+
+Add this source in SideStore or AltStore (Sources → Add Source):
+
+```
+https://moondotgz.github.io/anki-ios/apps.json
+```
+
+Or open https://moondotgz.github.io/anki-ios/ on your iPhone and tap **Add to SideStore** / **Add to AltStore**. The page also links the latest IPA and lists previous builds.
+
 ### CI
 
-`.github/workflows/build-ipa.yml` runs on GitHub's `xcode-27` runner. It generates the project, builds a Release app without code signing, and uploads `AnkiSwift-unsigned.ipa` as a workflow artifact. Sign the IPA yourself, for example with AltStore, Sideloadly or `codesign`, before installing it.
+`.github/workflows/build-ipa.yml` runs on GitHub's `xcode-27` runner. It generates the project, builds a Release app without code signing, and uploads `AnkiSwift-unsigned.ipa` as a workflow artifact. The workflow run number becomes the build number (`CFBundleVersion`); the version comes from `MARKETING_VERSION` in `project.yml`.
+
+On pushes to `main` it also:
+
+1. publishes the IPA as a GitHub release tagged `build-<run number>`, with the commit message as release notes;
+2. rebuilds the source from all `build-*` releases with `scripts/make_source.py`, and deploys it to GitHub Pages together with the page in `site/`.
+
+SideStore and AltStore sign the IPA when they install it. To sideload it another way, sign it yourself, for example with Sideloadly or `codesign`.
 
 ## Layout
 
