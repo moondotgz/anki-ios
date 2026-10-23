@@ -79,7 +79,6 @@ struct SettingsView: View {
     @State private var showLogin = false
     @State private var confirmUpload = false
     @State private var confirmDownload = false
-    @State private var showImporter = false
 
     var body: some View {
         @Bindable var app = app
@@ -122,8 +121,8 @@ struct SettingsView: View {
                 }
 
                 Section("Collection") {
-                    Button("Import Deck (.apkg)", systemImage: "square.and.arrow.down") { showImporter = true }
-                    Button("Restore Backup (.colpkg)", systemImage: "archivebox") { showImporter = true }
+                    Button("Import Deck (.apkg)", systemImage: "square.and.arrow.down") { app.showFilePicker = true }
+                    Button("Restore Backup (.colpkg)", systemImage: "archivebox") { app.showFilePicker = true }
                     Button("Check Database", systemImage: "stethoscope") { app.checkDatabase() }
                     LabeledContent("Cards", value: "\(app.col?.cardCount ?? 0)")
                     LabeledContent("Notes", value: "\(app.col?.noteCount ?? 0)")
@@ -139,9 +138,6 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .sheet(isPresented: $showLogin) {
                 NavigationStack { LoginView() }
-            }
-            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.apkg, .colpkg, .zip, .data]) { result in
-                if case .success(let url) = result { app.beginImport(url) }
             }
             .confirmationDialog("Replace AnkiWeb's copy with this device's collection?",
                                 isPresented: $confirmUpload, titleVisibility: .visible) {

@@ -9,7 +9,6 @@ extension UTType {
 struct DeckListView: View {
     @Environment(AppModel.self) private var app
     @State private var path: [Int64] = []
-    @State private var showImporter = false
     @State private var addingNote = false
     @State private var newDeckName = ""
     @State private var showNewDeck = false
@@ -30,7 +29,7 @@ struct DeckListView: View {
                     } description: {
                         Text("Sync with AnkiWeb, import a deck, or add a note to get started.")
                     } actions: {
-                        Button("Import a Deck", systemImage: "square.and.arrow.down") { showImporter = true }
+                        Button("Import a Deck", systemImage: "square.and.arrow.down") { app.showFilePicker = true }
                             .buttonStyle(.glassProminent)
                         Link(destination: URL(string: "https://ankiweb.net/shared/decks")!) {
                             Label("Browse Shared Decks", systemImage: "safari")
@@ -85,7 +84,7 @@ struct DeckListView: View {
                             showNewDeck = true
                         }
                         Button("Create Filtered Deck", systemImage: "line.3.horizontal.decrease.circle") { creatingFiltered = true }
-                        Button("Import Deck", systemImage: "square.and.arrow.down") { showImporter = true }
+                        Button("Import Deck", systemImage: "square.and.arrow.down") { app.showFilePicker = true }
                         Link(destination: URL(string: "https://ankiweb.net/shared/decks")!) {
                             Label("Get Shared Decks", systemImage: "safari")
                         }
@@ -110,9 +109,6 @@ struct DeckListView: View {
             }
             .fullScreenCover(item: $studying) { target in
                 StudyView(app: app, deckID: target.id)
-            }
-            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.apkg, .colpkg, .zip, .data]) { result in
-                if case .success(let url) = result { app.beginImport(url) }
             }
             .alert("New Deck", isPresented: $showNewDeck) {
                 TextField("Name", text: $newDeckName)

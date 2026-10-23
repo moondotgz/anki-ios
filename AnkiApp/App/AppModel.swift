@@ -38,6 +38,8 @@ final class AppModel {
     var isSyncing = false
     var syncProgress = ""
     var importRequest: ImportRequest?
+    /// Shows the system file picker for packages.
+    var showFilePicker = false
     /// Set while an import writes to the collection; sync and refresh wait.
     private(set) var isImporting = false
     var selectedTab: AppTab = .decks
@@ -248,8 +250,9 @@ final class AppModel {
             errorMessage = "Couldn't read “\(url.lastPathComponent)”: \(error.localizedDescription)"
             return
         }
-        // files opened from other apps arrive in Documents/Inbox; don't keep them
-        if url.path.contains("/Documents/Inbox/") { try? fm.removeItem(at: url) }
+        // copies handed over by other apps or the picker live in our Inbox
+        // folders; don't keep them around
+        if url.path.contains("/Documents/Inbox/") || url.path.contains("-Inbox/") { try? fm.removeItem(at: url) }
         if let old = importRequest { try? fm.removeItem(at: old.fileURL) }
         selectedTab = .decks
         importRequest = ImportRequest(fileURL: copy, displayName: url.lastPathComponent)

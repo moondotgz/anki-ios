@@ -83,6 +83,17 @@ struct RootView: View {
         } message: {
             Text(app.infoMessage ?? "")
         }
+        .sheet(isPresented: $app.showFilePicker) {
+            DocumentPicker { url in
+                app.showFilePicker = false
+                // let the picker finish dismissing before the import sheet appears
+                Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    app.beginImport(url)
+                }
+            }
+            .ignoresSafeArea()
+        }
         .sheet(item: $app.importRequest) { request in
             ImportView(request: request)
                 .presentationDetents([.large])
