@@ -44,7 +44,7 @@ def release_versions(releases):
                 meta[key.strip()] = value.strip()
         notes = "\n".join(l for l in (rel.get("body") or "").splitlines() if not l.startswith("<!--")).strip()
         versions.append({
-            "version": meta.get("version", "1.0.0"),
+            "version": meta.get("version", "1.0." + rel["tag_name"].removeprefix("build-")),
             "buildVersion": meta.get("build", rel["tag_name"].removeprefix("build-")),
             "date": rel.get("published_at") or rel.get("created_at"),
             "localizedDescription": notes or rel.get("name") or "",

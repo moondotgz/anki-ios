@@ -35,7 +35,7 @@ Or open https://moondotgz.github.io/anki-ios/ on your iPhone and tap **Add to Si
 
 ### CI
 
-`.github/workflows/build-ipa.yml` runs on GitHub's `xcode-27` runner. It generates the project, builds a Release app without code signing, and uploads `AnkiSwift-unsigned.ipa` as a workflow artifact. The workflow run number becomes the build number (`CFBundleVersion`); the version comes from `MARKETING_VERSION` in `project.yml`.
+`.github/workflows/build-ipa.yml` runs on GitHub's `xcode-27` runner. It generates the project, builds a Release app without code signing, and uploads `AnkiSwift-unsigned.ipa` as a workflow artifact. Every build gets a new version: `MARKETING_VERSION` in `project.yml` holds the major and minor (e.g. `1.0`), and the workflow run number becomes both the patch number and the build number, so build 42 is version `1.0.42` (`CFBundleVersion` 42). This way SideStore and AltStore always offer the update. Bump `MARKETING_VERSION` for a new major or minor release.
 
 On pushes to `main` it also:
 

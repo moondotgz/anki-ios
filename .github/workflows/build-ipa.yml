@@ -29,10 +29,14 @@ jobs:
       - name: Read version
         id: version
         run: |
-          VERSION=$(sed -n 's/^ *MARKETING_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' project.yml | head -1)
-          echo "version=${VERSION:-1.0.0}" >> "$GITHUB_OUTPUT"
+          # project.yml holds MAJOR.MINOR; every build gets a new patch number
+          # so SideStore/AltStore always see a higher version
+          BASE=$(sed -n 's/^ *MARKETING_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' project.yml | head -1)
+          BASE=$(echo "${BASE:-1.0}" | cut -d. -f1-2)
+          VERSION="${BASE}.${{ github.run_number }}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "build=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
-          echo "Version ${VERSION:-1.0.0} build ${{ github.run_number }}"
+          echo "Version ${VERSION} build ${{ github.run_number }}"
 
       - name: Show toolchain
         run: |
@@ -66,6 +70,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
             CURRENT_PROJECT_VERSION="${{ steps.version.outputs.build }}" > xcodebuild.log 2>&1
           then
             grep -E "error:" xcodebuild.log | sort -u | head -100
