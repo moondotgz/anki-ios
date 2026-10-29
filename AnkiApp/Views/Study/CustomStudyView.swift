@@ -142,7 +142,7 @@ struct CustomStudyView: View {
                                 if selectedTags.contains(tag) { selectedTags.remove(tag) } else { selectedTags.insert(tag) }
                             } label: {
                                 HStack {
-                                    Text(tag).foregroundStyle(.primary)
+                                    Text(tag).foregroundStyle(Color.primary)
                                     Spacer()
                                     if selectedTags.contains(tag) {
                                         Image(systemName: "checkmark").foregroundStyle(.tint)

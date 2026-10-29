@@ -18,10 +18,10 @@ struct ProfilesSection: View {
                     HStack(spacing: 12) {
                         ProfileBadge(name: profile.name)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(profile.name).foregroundStyle(.primary)
+                            Text(profile.name).foregroundStyle(Color.primary)
                             Text(account(profile))
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.secondary)
                         }
                         Spacer()
                         if profile.id == app.profile.id {
