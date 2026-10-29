@@ -86,6 +86,14 @@ struct SettingsView: View {
             Form {
                 ProfilesSection()
 
+                Section {
+                    NavigationLink {
+                        AppearanceView()
+                    } label: {
+                        Label("Appearance", systemImage: "paintpalette")
+                    }
+                }
+
                 Section("AnkiWeb") {
                     if app.isLoggedIn {
                         LabeledContent("Account", value: app.username)

@@ -149,13 +149,15 @@ final class StudyModel {
         rendered = CardRenderer.render(card: card, note: n, collection: col)
     }
 
-    func html(nightMode: Bool, compare: String?) -> String {
+    func html(nightMode: Bool, compare: String?, fontScale: Double = 1, customCSS: String = "",
+              tapToReveal: Bool = false) -> String {
         guard let r = rendered else { return "" }
         var body = showingAnswer ? r.answerHTML : r.questionHTML
         if showingAnswer, let compare {
             body = body.replacingOccurrences(of: "<div id=typeansCompare></div>", with: compare)
         }
-        return CardHTML.page(body: body, css: r.css, ord: r.ord, nightMode: nightMode)
+        return CardHTML.page(body: body, css: r.css, ord: r.ord, nightMode: nightMode, fontScale: fontScale,
+                             customCSS: customCSS, tapToReveal: tapToReveal)
     }
 }
 
@@ -163,6 +165,17 @@ struct StudyView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(ThemeKey.appearance) private var appearance = AppearanceMode.system
+    @AppStorage(ThemeKey.accent) private var accent = AccentChoice.blue
+    @AppStorage(ThemeKey.cardNightMode) private var cardNight = CardNightMode.followTheme
+    @AppStorage(ThemeKey.cardFontScale) private var fontScale = 1.0
+    @AppStorage(ThemeKey.customCSS) private var customCSS = ""
+    @AppStorage(ThemeKey.buttonStyle) private var buttonStyle = AnswerButtonStyle.tinted
+    @AppStorage(ThemeKey.buttonSize) private var buttonSize = AnswerButtonSize.regular
+    @AppStorage(ThemeKey.haptics) private var haptics = true
+    @AppStorage(ThemeKey.tapToReveal) private var tapToReveal = false
+
+    private var nightCards: Bool { cardNight.isNight(colorScheme) }
     @State private var model: StudyModel
     @State private var webView: WKWebView?
     @State private var typeCompare: String?
@@ -180,12 +193,13 @@ struct StudyView: View {
 
     var body: some View {
         ZStack {
-            (colorScheme == .dark ? Color(red: 0.11, green: 0.11, blue: 0.12) : Color.white)
+            (nightCards ? Color(red: 0.11, green: 0.11, blue: 0.12) : Color.white)
                 .ignoresSafeArea()
             if model.finished {
                 CongratsView(nextLearningDue: model.nextLearningDue, onCustomStudy: { showCustomStudy = true }) { dismiss() }
             } else if let folder = app.col?.mediaFolder {
-                CardWebView(html: model.html(nightMode: colorScheme == .dark, compare: typeCompare),
+                CardWebView(html: model.html(nightMode: nightCards, compare: typeCompare, fontScale: fontScale,
+                                             customCSS: customCSS, tapToReveal: tapToReveal),
                             mediaFolder: folder, onMessage: handleMessage, webViewRef: $webView)
                     .ignoresSafeArea(edges: .bottom)
             }
@@ -196,6 +210,8 @@ struct StudyView: View {
             }
         }
         .statusBarHidden(false)
+        .tint(accent.color)
+        .preferredColorScheme(appearance.colorScheme)
         .sheet(item: $editingNote) { note in
             NavigationStack {
                 NoteEditorView(mode: .edit(note)) { model.reloadCurrent() }
@@ -347,7 +363,7 @@ struct StudyView: View {
                     Text("Show Answer")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 56)
+                        .frame(height: max(48, buttonSize.height - 4))
                         .contentShape(.capsule)
                 }
                 .buttonStyle(.plain)
@@ -359,7 +375,7 @@ struct StudyView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
         .animation(.smooth(duration: 0.25), value: model.showingAnswer)
-        .sensoryFeedback(.impact(weight: .light), trigger: model.card?.id)
+        .sensoryFeedback(.impact(weight: .light), trigger: haptics ? model.card?.id : nil)
     }
 
     private func answerButton(_ rating: Int, _ title: String, _ color: Color, key: KeyEquivalent) -> some View {
@@ -367,23 +383,10 @@ struct StudyView: View {
             typeCompare = nil
             withAnimation(.smooth(duration: 0.2)) { model.answer(rating) }
         } label: {
-            VStack(spacing: 2) {
-                if model.showIntervals {
-                    Text(model.intervals[rating - 1])
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(color)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 60)
-            .contentShape(.rect(cornerRadius: 22))
+            AnswerButtonLabel(title: title, interval: model.intervals[rating - 1], color: color,
+                              style: buttonStyle, size: buttonSize, showInterval: model.showIntervals)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(color.opacity(0.18)).interactive(), in: .rect(cornerRadius: 22))
-        .glassEffectID("answer\(rating)", in: glass)
         .keyboardShortcut(key, modifiers: [])
     }
 
@@ -402,6 +405,8 @@ struct StudyView: View {
     private func handleMessage(_ message: String) {
         if message.hasPrefix("play:"), let folder = app.col?.mediaFolder {
             SoundPlayer.shared.play([String(message.dropFirst(5))], folder: folder)
+        } else if message == "tap" {
+            if !model.showingAnswer { reveal() }
         } else if message == "ans" {
             if model.showingAnswer { model.answer(3) } else { reveal() }
         }

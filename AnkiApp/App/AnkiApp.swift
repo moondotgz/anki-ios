@@ -33,6 +33,8 @@ struct AnkiApp: App {
 
 struct RootView: View {
     @Environment(AppModel.self) private var app
+    @AppStorage(ThemeKey.appearance) private var appearance = AppearanceMode.system
+    @AppStorage(ThemeKey.accent) private var accent = AccentChoice.blue
 
     var body: some View {
         @Bindable var app = app
@@ -51,6 +53,8 @@ struct RootView: View {
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
+        .tint(accent.color)
+        .preferredColorScheme(appearance.colorScheme)
         .overlay {
             if let message = app.busyMessage {
                 ZStack {

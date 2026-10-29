@@ -132,7 +132,8 @@ struct CardWebView: UIViewRepresentable {
 }
 
 enum CardHTML {
-    static func page(body: String, css: String, ord: Int, nightMode: Bool, fontScale: Double = 1) -> String {
+    static func page(body: String, css: String, ord: Int, nightMode: Bool, fontScale: Double = 1,
+                     customCSS: String = "", tapToReveal: Bool = false) -> String {
         let needsMathJax = body.contains("\\(") || body.contains("\\[")
         let mathJax = needsMathJax ? """
             <script>window.MathJax = { tex: { inlineMath: [["\\\\(", "\\\\)"]], displayMath: [["\\\\[", "\\\\]"]] }, svg: { fontCache: "global" } };</script>
@@ -166,6 +167,7 @@ enum CardHTML {
             hr#answer { border: none; border-top: 1px solid rgba(128,128,128,0.4); margin: 18px 0; }
             </style>
             <style>\(css)</style>
+            <style>\(customCSS)</style>
             \(mathJax)
             </head>
             <body class="card card\(ord + 1)\(nightMode ? " nightMode night_mode" : "")">
@@ -174,6 +176,11 @@ enum CardHTML {
             function ankiPlay(name) { window.webkit.messageHandlers.anki.postMessage("play:" + name); }
             function _typeAnsPress() { if (window.event && window.event.keyCode === 13) { window.webkit.messageHandlers.anki.postMessage("ans"); } }
             function _getTypedAnswer() { var e = document.getElementById("typeans"); return e ? e.value : ""; }
+            document.addEventListener("click", function (e) {
+              if (!\(tapToReveal ? "true" : "false")) { return; }
+              if (e.target.closest("a, button, input, textarea, select, audio, video, summary, label, .hint")) { return; }
+              window.webkit.messageHandlers.anki.postMessage("tap");
+            });
             function _setTypeCompare(html) { var e = document.getElementById("typeansCompare"); if (e) { e.innerHTML = html; } }
             document.addEventListener("DOMContentLoaded", function () {
               var t = document.getElementById("typeans"); if (t && t.tagName === "INPUT") { setTimeout(function () { t.focus(); }, 50); }

@@ -283,6 +283,7 @@ struct DeckRow: View {
 
 struct CountsView: View {
     let counts: DeckCounts
+    @AppStorage(ThemeKey.colorfulDeckCounts) private var colorful = true
 
     var body: some View {
         HStack(spacing: 10) {
@@ -295,7 +296,7 @@ struct CountsView: View {
 
     private func number(_ n: Int, _ color: Color) -> some View {
         Text("\(n)")
-            .foregroundStyle(n == 0 ? Color.secondary.opacity(0.4) : color)
+            .foregroundStyle(n == 0 ? Color.secondary.opacity(0.4) : (colorful ? color : Color.primary))
             .frame(minWidth: 24, alignment: .trailing)
     }
 }
