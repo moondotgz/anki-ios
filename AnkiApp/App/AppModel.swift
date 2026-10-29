@@ -46,49 +46,124 @@ final class AppModel {
     /// A deck to start studying, e.g. after importing it.
     var studyRequest: Int64?
 
-    // Preferences live in UserDefaults; access/withMutation keep them observable.
+    // MARK: Profiles
+
+    private(set) var profiles: [Profile] = ProfileStore.load()
+    private(set) var profile: Profile = ProfileStore.current(in: ProfileStore.load())
+
+    // Preferences live in UserDefaults, per profile; access/withMutation keep
+    // them observable.
+    private func string(_ name: String) -> String? { UserDefaults.standard.string(forKey: profile.key(name)) }
+    private func bool(_ name: String, _ fallback: Bool) -> Bool {
+        UserDefaults.standard.object(forKey: profile.key(name)) as? Bool ?? fallback
+    }
+    private func setDefault(_ value: Any?, _ name: String) { UserDefaults.standard.set(value, forKey: profile.key(name)) }
+
     var username: String {
-        get { access(keyPath: \.username); return UserDefaults.standard.string(forKey: "syncUsername") ?? "" }
-        set { withMutation(keyPath: \.username) { UserDefaults.standard.set(newValue, forKey: "syncUsername") } }
+        get { access(keyPath: \.username); return string("syncUsername") ?? "" }
+        set { withMutation(keyPath: \.username) { setDefault(newValue, "syncUsername") } }
     }
     var customServer: String {
-        get { access(keyPath: \.customServer); return UserDefaults.standard.string(forKey: "customSyncServer") ?? "" }
-        set { withMutation(keyPath: \.customServer) { UserDefaults.standard.set(newValue, forKey: "customSyncServer") } }
+        get { access(keyPath: \.customServer); return string("customSyncServer") ?? "" }
+        set { withMutation(keyPath: \.customServer) { setDefault(newValue, "customSyncServer") } }
     }
     var syncMedia: Bool {
-        get { access(keyPath: \.syncMedia); return UserDefaults.standard.object(forKey: "syncMedia") as? Bool ?? true }
-        set { withMutation(keyPath: \.syncMedia) { UserDefaults.standard.set(newValue, forKey: "syncMedia") } }
+        get { access(keyPath: \.syncMedia); return bool("syncMedia", true) }
+        set { withMutation(keyPath: \.syncMedia) { setDefault(newValue, "syncMedia") } }
     }
     var autoSync: Bool {
-        get { access(keyPath: \.autoSync); return UserDefaults.standard.object(forKey: "autoSync") as? Bool ?? true }
-        set { withMutation(keyPath: \.autoSync) { UserDefaults.standard.set(newValue, forKey: "autoSync") } }
+        get { access(keyPath: \.autoSync); return bool("autoSync", true) }
+        set { withMutation(keyPath: \.autoSync) { setDefault(newValue, "autoSync") } }
     }
-    private(set) var hostKey: String? = Keychain.get("hostKey")
+    private(set) var hostKey: String?
     var isLoggedIn: Bool { hostKey != nil }
 
     /// Endpoint learned from a server redirect, kept until logout.
     private var redirectedEndpoint: String? {
-        get { UserDefaults.standard.string(forKey: "syncEndpoint") }
-        set { UserDefaults.standard.set(newValue, forKey: "syncEndpoint") }
+        get { string("syncEndpoint") }
+        set { setDefault(newValue, "syncEndpoint") }
     }
 
-    static var baseFolder: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return docs.appendingPathComponent("Anki", isDirectory: true)
-    }
-    static var collectionURL: URL { baseFolder.appendingPathComponent("collection.anki2") }
-    static var mediaFolder: URL { baseFolder.appendingPathComponent("collection.media", isDirectory: true) }
-    static var mediaDBURL: URL { baseFolder.appendingPathComponent("collection.media.db") }
+    var collectionURL: URL { profile.collectionURL }
 
     init() {
+        hostKey = Keychain.get(profile.key("hostKey"))
         open()
+    }
+
+    /// Closes the current collection and opens another profile's.
+    func switchProfile(to id: String) {
+        guard id != profile.id, let next = profiles.first(where: { $0.id == id }) else { return }
+        guard !isSyncing, !isImporting else {
+            errorMessage = "Wait for the current sync or import to finish before switching profiles."
+            return
+        }
+        col?.close()
+        col = nil
+        media = nil
+        deckTree = []
+        profile = next
+        ProfileStore.currentID = next.id
+        hostKey = Keychain.get(next.key("hostKey"))
+        // re-read the per-profile preferences
+        withMutation(keyPath: \.username) {}
+        withMutation(keyPath: \.customServer) {}
+        withMutation(keyPath: \.syncMedia) {}
+        withMutation(keyPath: \.autoSync) {}
+        selectedTab = .decks
+        open()
+        if autoSync && isLoggedIn { Task { await sync() } }
+    }
+
+    @discardableResult
+    func addProfile(named rawName: String) -> Profile? {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        guard !profiles.contains(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
+            errorMessage = "A profile named “\(name)” already exists."
+            return nil
+        }
+        let new = Profile(id: UUID().uuidString, name: name)
+        profiles.append(new)
+        ProfileStore.save(profiles)
+        return new
+    }
+
+    func renameProfile(_ id: String, to rawName: String) {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let idx = profiles.firstIndex(where: { $0.id == id }) else { return }
+        guard !profiles.contains(where: { $0.id != id && $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
+            errorMessage = "A profile named “\(name)” already exists."
+            return
+        }
+        profiles[idx].name = name
+        ProfileStore.save(profiles)
+        if profile.id == id { profile = profiles[idx] }
+    }
+
+    /// Deletes another profile with its collection, media and login.
+    func deleteProfile(_ id: String) {
+        guard id != profile.id, let victim = profiles.first(where: { $0.id == id }) else { return }
+        let fm = FileManager.default
+        if victim.isLegacy {
+            for url in [victim.collectionURL, victim.mediaFolder, victim.mediaDBURL,
+                        victim.folder.appendingPathComponent("collection-backup.anki2")] {
+                try? fm.removeItem(at: url)
+            }
+        } else {
+            try? fm.removeItem(at: victim.folder)
+        }
+        Keychain.set(nil, for: victim.key("hostKey"))
+        for key in ProfileStore.settingKeys { UserDefaults.standard.removeObject(forKey: victim.key(key)) }
+        profiles.removeAll { $0.id == id }
+        ProfileStore.save(profiles)
     }
 
     func open() {
         do {
-            try FileManager.default.createDirectory(at: AppModel.baseFolder, withIntermediateDirectories: true)
-            col = try Collection(url: AppModel.collectionURL, mediaFolder: AppModel.mediaFolder)
-            media = try MediaManager(folder: AppModel.mediaFolder, dbURL: AppModel.mediaDBURL)
+            try FileManager.default.createDirectory(at: profile.folder, withIntermediateDirectories: true)
+            col = try Collection(url: profile.collectionURL, mediaFolder: profile.mediaFolder)
+            media = try MediaManager(folder: profile.mediaFolder, dbURL: profile.mediaDBURL)
             refresh()
         } catch {
             errorMessage = "Couldn't open the collection: \(error.localizedDescription)"
@@ -133,7 +208,7 @@ final class AppModel {
         do {
             let client = SyncClient(endpoint: endpoint)
             let key = try await client.login(username: username, password: password)
-            Keychain.set(key, for: "hostKey")
+            Keychain.set(key, for: profile.key("hostKey"))
             hostKey = key
             self.username = username
             return true
@@ -144,7 +219,7 @@ final class AppModel {
     }
 
     func logout() {
-        Keychain.set(nil, for: "hostKey")
+        Keychain.set(nil, for: profile.key("hostKey"))
         hostKey = nil
         redirectedEndpoint = nil
     }
@@ -219,7 +294,7 @@ final class AppModel {
         col?.close()
         col = nil
         let fm = FileManager.default
-        let target = AppModel.collectionURL
+        let target = profile.collectionURL
         let backup = target.deletingLastPathComponent().appendingPathComponent("collection-backup.anki2")
         try? fm.removeItem(at: backup)
         try? fm.moveItem(at: target, to: backup)
@@ -311,7 +386,7 @@ final class AppModel {
         defer { isImporting = false }
         do {
             let media = self.media
-            let colURL = AppModel.collectionURL
+            let colURL = profile.collectionURL
             let source = request.fileURL
             let newURL = try await Task.detached(priority: .userInitiated) {
                 try PackageImporter.extractColpkg(source, besides: colURL, media: media)

@@ -52,6 +52,7 @@ struct DeckListView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Decks")
+            .navigationSubtitle(app.profiles.count > 1 ? app.profile.name : "")
             .navigationDestination(for: Int64.self) { id in
                 DeckOverviewView(deckID: id) { studying = StudyTarget(id: id) }
             }
@@ -75,6 +76,11 @@ struct DeckListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     SyncButton()
+                }
+                if app.profiles.count > 1 {
+                    ToolbarItem(placement: .topBarLeading) {
+                        ProfileMenu()
+                    }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Menu {

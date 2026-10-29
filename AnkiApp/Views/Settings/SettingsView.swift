@@ -84,6 +84,8 @@ struct SettingsView: View {
         @Bindable var app = app
         NavigationStack {
             Form {
+                ProfilesSection()
+
                 Section("AnkiWeb") {
                     if app.isLoggedIn {
                         LabeledContent("Account", value: app.username)
